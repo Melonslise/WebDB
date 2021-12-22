@@ -12,8 +12,12 @@ MYSQL_UNAME=""
 MYSQL_PW=""
 MYSQL_DB=""
 ```
-
 2.
+```
+npm install
+```
+
+3.
 ```
 npm run dev
 ```
@@ -23,5 +27,5 @@ npm run dev
 - `static/` - static assets that are not prerendered
 - `src/` - application root
 - `src/lib/` - application components
-- `src/routes/` - server page routes
+- `src/routes/` - prerendered server page routes
 - `src/routes/api` - server api endpoints and helpers
