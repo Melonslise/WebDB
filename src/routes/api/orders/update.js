@@ -1,10 +1,10 @@
 import * as database from "../_database";
 
-const fields = [ "id", "date", "name", "price", "quantity", "total" ];
+const fields = [ "date", "id", "name", "price", "quantity", "total", "address", "receiverId", "statusId" ];
 
 export async function post(request)
 {
-	if(!request.locals.user)
+	if(!request.locals.user || !request.locals.user.role.writePerms)
 	{
 		return { status: 401, body: { message: "Not authorized" } };
 	}
@@ -20,10 +20,12 @@ export async function post(request)
 	const uname = request.locals.user.uname;
 	const order = request.body;
 
-	if(!database.orderBelongsTo(uname, order.id))
+	if(!database.orderSentBy(uname, order.id))
 	{
 		return { status: 403, body: { message: "Forbidden" } };
 	}
+
+	request.body.senderId = request.locals.user.uid;
 
 	const updated = await database.updateOrder(order);
 

@@ -1,8 +1,8 @@
 import * as database from "../_database";
 
-export async function del(request)
+export async function post(request)
 {
-	if(!request.locals.user || !request.locals.user.role.writePerms)
+	if(!request.locals.user || !request.locals.user.role.readPerms)
 	{
 		return { status: 401, body: { message: "Not authorized" } };
 	}
@@ -15,12 +15,12 @@ export async function del(request)
 		return { status: 400, body: { message: "Data missing or invalid" } };
 	}
 
-	if(!database.orderSentBy(uname, orderId))
+	if(!database.orderIsFor(uname, orderId))
 	{
 		return { status: 403, body: { message: "Forbidden" } };
 	}
 
-	const deleted = await database.deleteOrder(orderId);
+	const cancelled = await database.cancelOrder(orderId);
 
-	return deleted ? { status: 200, body: { message: "Order deleted" } } : { status: 500, body: { message: "Error deleting order from database" } };
+	return cancelled ? { status: 200, body: { message: "Order cancelled" } } : { status: 500, body: { message: "Error cancelling order" } };
 }

@@ -1,10 +1,10 @@
 import * as database from "../_database";
 
-const fields = [ "date", "name", "price", "quantity", "total" ];
+const fields = [ "date", "name", "price", "quantity", "total", "address", "receiverId", "statusId" ];
 
 export async function put(request)
 {
-	if(!request.locals.user)
+	if(!request.locals.user || !request.locals.user.role.writePerms)
 	{
 		return { status: 401, body: { message: "Not authorized" } };
 	}
@@ -17,7 +17,9 @@ export async function put(request)
 		}
 	}
 
-	const added = await database.addOrderFor(request.locals.user.uname, request.body);
+	request.body.senderId = request.locals.user.uid;
+
+	const added = await database.addOrder(request.body);
 
 	return added ? { status: 200, body: { message: "Order added" } } : { status: 500, body: { message: "Error adding order to database" } };
 }

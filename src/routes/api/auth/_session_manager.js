@@ -12,7 +12,7 @@ export function createSession(uname)
 	sessionById.set(session.id, session);
 	sessionByUname.set(session.uname, session);
 
-	return session.id;
+	return session;
 }
 
 export function getSessionById(id)

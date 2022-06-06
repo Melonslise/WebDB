@@ -10,7 +10,7 @@ export function handle({ request, resolve })
 		const session = sessions.getSessionById(cookies.session_id);
 		if(session)
 		{
-			request.locals.user = { uname: session.uname };
+			request.locals.user = { uid: session.uid, uname: session.uname, role: session.role };
 			return resolve(request);
 		}
 	}
@@ -21,5 +21,5 @@ export function handle({ request, resolve })
 
 export function getSession(request)
 {
-	return request.locals.user ? { user: { uname: request.locals.user.uname } } : {};
+	return request.locals.user ? { user: { uname: request.locals.user.uname, role: request.locals.user.role } } : {};
 }

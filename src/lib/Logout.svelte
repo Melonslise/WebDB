@@ -14,9 +14,7 @@
 	}
 </script>
 
-{#if $authorized}
-	<button on:click = {logout}>Logout</button>
-{/if}
+<button on:click = {logout}>Logout</button>
 
 <style>
 	button

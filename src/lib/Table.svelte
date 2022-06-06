@@ -1,8 +1,105 @@
 <script>
+	import { role } from "$lib/stores.js";
+
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
 
+	onMount(updateOrders);
+
+	function click(e)
+	{
+		const parent = e.target.parentNode;
+		if(parent.nodeName !== "BUTTON" && parent.nodeName === "TR" && parent.parentNode.nodeName === "TBODY" && parent.id !== "new-row")
+		{
+			openMenu(e.clientX, e.clientY, parent.id.substring(5));
+
+			return;
+		}
+		
+		if(e.target.nodeName === "TH")
+		{
+			currentSorter = e.target.id.substring(5);
+			updateDisplayOrders();
+		}
+
+		resetMenu();
+	}
+
+	/*
+	*
+	* Context Menu
+	*
+	*/
+
 	let menuPos = { x: -1, y: -1 };
+
+	let selectedOrderId;
+	let orderBeingEdited;
+
+
+
+
+	function openMenu(x, y, id)
+	{
+		menuPos.x = x;
+		menuPos.y = y;
+
+		selectedOrderId = id;
+	}
+
+	function resetMenu()
+	{
+		menuPos.x = -1;
+		menuPos.y = -1;
+
+		selectedOrderId = null;
+	}
+
+	function clickEdit()
+	{
+		orderBeingEdited = getSelectedOrder();
+
+		for(const field in editErrors)
+		{
+			editErrors[field] = false;
+		}
+
+		if(!orderBeingEdited)
+		{
+			return;
+		}
+
+		resetMenu();
+	}
+
+	function stopEditingOrder()
+	{
+		orderBeingEdited = null;
+	}
+
+	async function clickDelete()
+	{
+		await deleteOrder(selectedOrderId);
+
+		resetMenu();
+	}
+
+	async function clickCancel()
+	{
+		await cancelOrder(selectedOrderId);
+
+		resetMenu();
+	}
+
+	/*
+	*
+	* CRUD stuff
+	*
+	*/
+
+	const statuses = [ "pending", "shipped", "delivered", "cancelled" ]; // TODO: send from server
+
+	const isCancellable = status => status === "pending" || status === "shipped"; // TODO: this too
 
 	let orders = [];
 
@@ -10,19 +107,16 @@
 		name: false,
 		price: false,
 		quantity: false,
-		total: false
+		total: false,
+		address: false,
+		receiverId: false
 	};
 
-	const editErrors = {
-		name: false,
-		price: false,
-		quantity: false,
-		total: false
-	};
+	const editErrors = Object.assign({}, addErrors);
 
 
-	let selectedOrderId;
-	let editingOrder;
+
+
 
 	async function updateOrders()
 	{
@@ -34,34 +128,9 @@
 		}
 
 		const body = await response.json();
-		
+
 		orders = body.orders;
-	}
-
-	onMount(updateOrders);
-
-	function resetMenu()
-	{
-		menuPos.x = -1;
-		menuPos.y = -1;
-
-		selectedOrderId = null;
-	}
-
-	function click(e)
-	{
-		const parent = e.target.parentNode;
-		if(parent.nodeName !== "BUTTON" && parent.nodeName === "TR" && parent.parentNode.nodeName === "TBODY" && parent.id !== "new-row")
-		{
-			menuPos.x = e.clientX;
-			menuPos.y = e.clientY;
-
-			selectedOrderId = parent.id.substring(5);
-
-			return;
-		}
-
-		resetMenu();
+		updateDisplayOrders();
 	}
 
 	async function addOrder(e)
@@ -70,6 +139,7 @@
 
 		if(!validateForm(data, addErrors))
 		{
+			addErrors = addErrors;
 			return;
 		}
 
@@ -77,8 +147,6 @@
 		{
 			data.date = Date.now();
 		}
-
-		document.getElementById("add-form").reset();
 
 		const response = await fetch("/api/orders/create",
 		{
@@ -89,39 +157,31 @@
 
 		if(response.ok)
 		{
+			document.getElementById("add-form").reset();
 			updateOrders();
 		}
-	}
-
-	function editOrder()
-	{
-		editingOrder = orders.find(o => o.id == selectedOrderId);
-
-		if(!editingOrder)
+		else
 		{
-			return;
+			addErrors.receiverId = true;
 		}
-
-		resetMenu();
 	}
 
-	async function sendEditOrder(e)
+	async function editOrder(e)
 	{
 		const data = parseForm(e);
 
 		if(!validateForm(data, editErrors))
 		{
+			editErrors = editErrors;
 			return;
 		}
 
-		data.id = editingOrder.id;
+		data.id = orderBeingEdited.id;
 
 		if(!data.date)
 		{
 			data.date = Date.now();
 		}
-
-		editingOrder = null;
 
 		const response = await fetch("/api/orders/update",
 		{
@@ -132,30 +192,132 @@
 
 		if(response.ok)
 		{
+			stopEditingOrder(); // TODO: do not allow to send this again while waiting for response from server
 			updateOrders();
+		}
+		else
+		{
+			editErrors.receiverId = true;
 		}
 	}
 
-	function cancelEditOrder()
-	{
-		editingOrder = null;
-	}
-
-	async function deleteOrder()
+	async function deleteOrder(id)
 	{
 		const response = await fetch("/api/orders/delete",
 		{
 			method: "DELETE",
-			body: JSON.stringify({ id: selectedOrderId }),
+			body: JSON.stringify({ id: id }),
 			headers: { "Content-Type": "application/json" }
 		});
 
-		resetMenu();
-		
 		if(response.ok)
 		{
 			updateOrders();
 		}
+	}
+
+	async function cancelOrder(id)
+	{
+		const response = await fetch("/api/orders/cancel",
+		{
+			method: "POST",
+			body: JSON.stringify({ id: id }),
+			headers: { "Content-Type": "application/json" }
+		});
+
+		if(response.ok)
+		{
+			updateOrders();
+		}
+	}
+
+	/*
+	*
+	* Sorting / Filtering
+	*
+	*/
+
+	// TODO: close menu on order refresh and stop editing
+
+	let displayOrders = [];
+
+	const orderFields = {
+		"date": "Date",
+		"id": "ID",
+		"name": "Name",
+		"price": "Price",
+		"quantity": "Quantity",
+		"total": "Total",
+		"address": "Address",
+		"receiver": "To",
+		"sender": "From",
+		"statusId": "Status"
+	};
+
+	let currentSorter = null;
+
+	if(!isAdmin())
+	{
+		delete orderFields["receiver"];
+	}
+
+
+
+
+
+	function updateDisplayOrders()
+	{
+		displayOrders = orders.slice(); // shallow copy
+
+		applyFilter();
+		applySorter();
+	}
+
+	function applyFilter()
+	{
+		const type = document.getElementById("filter-type").value;
+		const str = document.getElementById("filter-search").value;
+
+		if(str.trim().length <= 0)
+		{
+			return;
+		}
+
+		displayOrders = displayOrders.filter(e => String(e[type]).includes(str));
+	}
+
+	function applySorter()
+	{
+		displayOrders.sort((a, b) =>
+		{
+			if(a[currentSorter] < b[currentSorter])
+			{
+				return -1;
+			}
+			if(a[currentSorter] > b[currentSorter])
+			{
+				return 1; 
+			}
+			return 0;
+		});
+
+		displayOrders = displayOrders;
+	}
+
+	/*
+	*
+	* Utils
+	*
+	*/
+
+	function getSelectedOrder()
+	{
+		return orders.find(o => o.id == selectedOrderId);
+	}
+
+	function isAdmin()
+	{
+		return $role === "admin";
 	}
 
 	function parseForm(e)
@@ -193,15 +355,8 @@
 		const date = new Date(dateString);
 		date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
 		return date.toISOString().slice(0, -1);
-	};
+	}
 </script>
-
-{#if menuPos.x >= 0 && menuPos.y >= 0}
-	<div id = "context-menu" in:fade = {{ duration: 80 }} style = "left: {menuPos.x}px; top: {menuPos.y}px">
-		<div class = "item" on:click = {editOrder}>Edit</div>
-		<div class = "item" on:click = {deleteOrder}>Delete</div>
-	</div>
-{/if}
 
 <svg style = "display: none">
 	<defs>
@@ -220,78 +375,157 @@
 				<polygon points = "386.813, 0 245, 141.812 103.188, 0 0, 103.188 141.813, 245 0, 386.812 103.187, 489.999 245, 348.187 386.813, 490 490, 386.812 348.187, 244.999 490, 103.187"/>
 			</g>
 		</symbol>
+		<symbol id = "arrow" viewBox = "0 0 490 490">
+			<g fill = "#ffffff">
+				<polygon points = "490, 157.332 244.996, 407.369 0, 157.332 76.493, 82.631 244.996, 254.598 413.507, 82.631"/>
+			</g>
+		</symbol>
 	</defs>
 </svg>
 
-<div id = "body" on:click = {click}>
-	<div id = "table">
+{#if menuPos.x >= 0 && menuPos.y >= 0}
+<div id = "context-menu" in:fade = {{ duration: 80 }} style = "left: {menuPos.x}px; top: {menuPos.y}px">
+	{#if isAdmin()}
+	<div class = "item" on:click = {clickEdit}>Edit</div>
+	<div class = "item" on:click = {clickDelete}>Delete</div>
+	{:else}
+	{#if isCancellable(getSelectedOrder().statusId)}
+	<div class = "item" on:click = {clickCancel}>Cancel</div>
+	{/if}
+	{/if}
+</div>
+{/if}
+
+<div id = "screen" on:click = {click}>
+	<div id = "main">
+		<div id = "filter">
+		<input id = "filter-search" on:input = {updateDisplayOrders} style = "width: 60%">
+		<select id = "filter-type" on:change = {updateDisplayOrders} style = "width: 35%">
+			{#each Object.keys(orderFields) as type}
+			<option value = {type}>{orderFields[type]}</option>
+			{/each}
+		</select>
+		</div>
 		<form id = "add-form" on:submit|preventDefault = {addOrder}></form>
-		<form id = "edit-form" on:submit|preventDefault = {sendEditOrder}></form>
-		<table id = "main-table">
+		<form id = "edit-form" on:submit|preventDefault = {editOrder}></form>
+		<table>
 			<thead>
 				<tr>
-					<th class = "column1">Date</th>
-					<th class = "column2">Order ID</th>
-					<th class = "column3">Name</th>
-					<th class = "column4">Price</th>
-					<th class = "column5">Quantity</th>
-					<th class = "column6">Total</th>
+					{#each Object.keys(orderFields) as field}
+					<th id = {"head_" + field}>
+					{orderFields[field]}
+					{#if field === currentSorter}
+					<svg width = "10px" height = "10px">
+						<use href = "#arrow">
+					</svg>
+					{/if}
+					</th>
+					{/each}
 				</tr>
 			</thead>
 			<tbody>
-				{#each orders as order}
-				<tr id = "order{order.id}">
-					{#if order === editingOrder}
-					<td class = "column1"><input type = "datetime-local" name = "date" form = "edit-form" value = {(toInputDate(order.date))} step = "1"></td>
-					<td class = "column2">{order.id}</td>
-					<td class = "column3"><input name = "name" form = "edit-form" value = {order.name}></td>
-					<td class = "column4"><input class = "right" type = "number" name = "price" form = "edit-form" value = {order.price}></td>
-					<td class = "column5"><input class = "right" type = "number" name = "quantity" form = "edit-form" value = {order.quantity}></td>
-					<td class = "column6"><input class = "right" type = "number" name = "total" form = "edit-form" value = {order.total}></td>
+				{#each displayOrders as order}
+				<tr id = {"order" + order.id}>
+					{#if order !== orderBeingEdited}
+					<td>{new Date(order.date).toLocaleString("ru-ru")}</td>
+					<td>{order.id}</td>
+					<td>{order.name}</td>
+					<td>${order.price}</td>
+					<td>{order.quantity}</td>
+					<td>${order.total}</td>
+					<td>{order.address}</td>
+					{#if isAdmin()}
+					<td>{order.receiver}</td>
+					{/if}
+					<td>{order.sender}</td>
+					<td>{order.statusId}</td>
+					{:else}
+					<td><input name = "date" type = "datetime-local" value = {(toInputDate(order.date))} form = "edit-form" step = "1"></td>
+					<td>{order.id}</td>
+					<td><input class:error = {editErrors.name}			name = "name"		value = {order.name} form = "edit-form"></td>
+					<td><input class:error = {editErrors.price}			name = "price"		value = {order.price} type = "number" form = "edit-form"></td>
+					<td><input class:error = {editErrors.quantity}		name = "quantity"	value = {order.quantity} type = "number" form = "edit-form"></td>
+					<td><input class:error = {editErrors.total}			name = "total"		value = {order.total} type = "number" form = "edit-form"></td>
+					<td><input class:error = {editErrors.address}		name = "address"	value = {order.address} form = "edit-form"></td>
+					<td><input class:error = {editErrors.receiverId}	name = "receiverId"	value = {order.receiverId} type = "number" form = "edit-form"></td>
+					<td>{order.senderId}</td>
+					<td>
+						<select name = "statusId" form = "edit-form">
+							{#each statuses as status}
+							<option value = {status} selected = {order.statusId === status}>{status}</option>
+							{/each}
+						</select>
+					</td>
 					<button class = "button1" type = "submit" form = "edit-form">
 						<svg width = "20px" height = "20px">
 							<use href = "#check">
 						</svg>
 					</button>
-					<button class = "button2" on:click = {cancelEditOrder}>
+					<button class = "button2" on:click = {stopEditingOrder}>
 						<svg width = "20px" height = "20px">
 							<use href = "#cross">
 						</svg>
 					</button>
-					{:else}
-					<td class = "column1">{new Date(order.date).toLocaleString("ru-ru")}</td>
-					<td class = "column2">{order.id}</td>
-					<td class = "column3">{order.name}</td>
-					<td class = "column4">${order.price}</td>
-					<td class = "column5">{order.quantity}</td>
-					<td class = "column6">${order.total}</td>
 					{/if}
-
 				</tr>
 				{/each}
+				{#if isAdmin()}
 				<tr id = "new-row">
-					<td class = "column1"><input type = "datetime-local" name = "date" form = "add-form" step = "1"></td>
-					<td class = "column2"></td>
-					<td class = "column3"><input class:error = {addErrors.name} name = "name" form = "add-form"></td>
-					<td class = "column4"><input class = "right" class:error = {addErrors.price} type = "number" name = "price" form = "add-form"></td>
-					<td class = "column5"><input class = "right" class:error = {addErrors.quantity} type = "number" name = "quantity" form = "add-form"></td>
-					<td class = "column6"><input class = "right" class:error = {addErrors.total} type = "number" name = "total" form = "add-form"></td>
+					<td><input name = "date" type = "datetime-local" form = "add-form" step = "1"></td>
+					<td></td>
+					<td><input class:error = {addErrors.name}		name = "name"		form = "add-form"></td>
+					<td><input class:error = {addErrors.price}		name = "price"		type = "number" form = "add-form"></td>
+					<td><input class:error = {addErrors.quantity}	name = "quantity"	type = "number" form = "add-form"></td>
+					<td><input class:error = {addErrors.total}		name = "total"		type = "number" form = "add-form"></td>
+					<td><input class:error = {addErrors.address}	name = "address"	form = "add-form"></td>
+					<td><input class:error = {addErrors.receiverId}	name = "receiverId"	type = "number" form = "add-form"></td>
+					<td></td>
+					<td>
+						<select name = "statusId" form = "add-form">
+							{#each statuses as status}
+							<option value = {status}>{status}</option>
+							{/each}
+						</select>
+					</td>
 					<button class = "button1" type = "submit" form = "add-form">
 						<svg width = "20px" height = "20px">
 							<use href = "#plus">
 						</svg>
 					</button>
 				</tr>
+				{/if}
 			</tbody>
 		</table>
 	</div>
 </div>
 
 <style>
-	#body
+	#filter
 	{
-		width: 100%;
-		height: 100%;
+		width: 256px;
+		height: 38px;
+		
+		margin: 10px 0px;
+		padding: 8px;
+	
+		border: none;
+		border-radius: 8px;
+		background-color: white;
+	}
+
+	button
+	{
+		position: absolute;
+		right: 0%;
+
+		width: 20px;
+		height: 20px;
+
+		background-color: transparent;
+		border: none;
+
+		text-align: center;
+		cursor: pointer;
 	}
 
 	#context-menu
@@ -317,7 +551,13 @@
 		border-radius: inherit;
 	}
 
-	#table
+	#screen
+	{
+		width: 100%;
+		height: 100%;
+	}
+
+	#main
 	{
 		position: absolute;
 		left: 50%;
@@ -328,15 +568,8 @@
 	table
 	{
 		border-collapse: collapse;
-		background: white;
 		border-radius: 10px;
 		overflow: hidden; /* fixes no border for some random fucking reason */
-	}
-
-	th, td
-	{
-		padding-left: 8px;
-		text-align: left;
 	}
 
 	thead tr
@@ -347,17 +580,22 @@
 
 	thead th
 	{
+		min-width: 130px;
 		font-size: 18px;
 		color: white;
 		line-height: 1.2;
 		font-weight: unset;
+		padding: 20px;
+		cursor: pointer;
 	}
 
 	tbody tr
 	{
 		height: 50px;
 		font-size: 15px;
+		text-align: center;
 		color: #808080;
+		background: white;
 	}
 
 	tbody tr:hover
@@ -370,64 +608,6 @@
 	tbody tr:nth-child(even)
 	{
 		background-color: #f5f5f5;
-	}
-
-	.column1
-	{
-		width: 260px;
-		padding-left: 40px;
-	}
-
-	.column2
-	{
-		width: 160px;
-	}
-
-	.column3
-	{
-		width: 245px;
-	}
-
-	.column4
-	{
-		width: 110px;
-		text-align: right;
-	}
-
-	.column5
-	{
-		width: 170px;
-		text-align: right;
-	}
-
-	.column6
-	{
-		width: 222px;
-		text-align: right;
-		padding-right: 62px;
-	}
-
-	input
-	{
-		width: 80%;
-
-		background: #f5f5f5;
-		border: none;
-		border-bottom: 1px solid rgba(0, 0, 0, 0.2);
-		outline: none;
-
-		font-size: 15px;
-		color: #808080;
-	}
-
-	input.error
-	{
-		border-bottom: 1px solid rgba(255, 0, 0, 1);
-	}
-
-	input.right
-	{
-		text-align: right;
 	}
 
 	.button1
@@ -450,18 +630,21 @@
 		transform: translate(60px, 17px);
 	}
 
-	button
+	input, select
 	{
-		position: absolute;
-		right: 0%;
+		width: 80%;
 
-		width: 20px;
-		height: 20px;
-
-		background-color: transparent;
+		background: #f5f5f5;
 		border: none;
+		border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+		outline: none;
 
-		text-align: center;
-		cursor: pointer;
+		font-size: 15px;
+		color: #808080;
+	}
+
+	input.error
+	{
+		border-bottom: 1px solid rgba(255, 0, 0, 1);
 	}
 </style>

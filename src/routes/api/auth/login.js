@@ -9,21 +9,31 @@ export async function post(request)
 		return { status: 400, body: { message: "Data missing or invalid" } };
 	}
 
-	const user = await database.findUserAccount(request.body.uname, request.body.pwd);
+	const user = await database.findUser(request.body.uname);
 
-	if(!user)
+	if(!user || user.password !== request.body.pwd)
 	{
 		return { status: 401, body: { message: "Username or password not found" } };
 	}
 
-	const sessionId = sessions.createSession(user.username);
+	const role = await database.getRolePerms(user.roleId);
+
+	if(!role)
+	{
+		return { status: 500, body: { message: "Role not found" } };
+	}
+
+	const session = sessions.createSession(user.username);
+
+	session.role = { id: role.id, readPerms: role.readPerms, writePerms: role.writePerms };
+	session.uid = user.id;
 
 	return {
 		status: 200,
-		body: { message: "Logged in" },
+		body: { message: "Logged in", userId: user.id, role: user.roleId },
 		headers:
 		{
-			"Set-Cookie": cookie.serialize("session_id", sessionId,
+			"Set-Cookie": cookie.serialize("session_id", session.id,
 			{
 				httpOnly: true,
 				sameSite: "strict",

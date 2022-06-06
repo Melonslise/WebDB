@@ -14,6 +14,25 @@ const mysql = new Sequelize(
 	logging: false
 });
 
+const Role = mysql.define("role",
+{
+	id:
+	{
+		type: DataTypes.STRING,
+		primaryKey: true
+	},
+	readPerms:
+	{
+		type: DataTypes.BOOLEAN,
+		allowNull: false
+	},
+	writePerms:
+	{
+		type: DataTypes.BOOLEAN,
+		allowNull: false
+	}
+});
+
 const User = mysql.define("user",
 {
 	username:
@@ -24,6 +43,20 @@ const User = mysql.define("user",
 	password:
 	{
 		type: DataTypes.STRING,
+		allowNull: false
+	}
+});
+
+const Status = mysql.define("status",
+{
+	id:
+	{
+		type: DataTypes.STRING,
+		primaryKey: true
+	},
+	cancellable:
+	{
+		type: DataTypes.BOOLEAN,
 		allowNull: false
 	}
 });
@@ -54,28 +87,62 @@ const Order = mysql.define("order",
 	{
 		type: DataTypes.DECIMAL,
 		allowNull: false
+	},
+	address:
+	{
+		type: DataTypes.STRING,
+		allowNull: false
 	}
 });
 
 async function initDb()
 {
-	User.hasMany(Order, { foreignKey: { allowNull: false } });
-	Order.belongsTo(User);
+	Role.hasMany(User, { foreignKey: { allowNull: false } });
+	User.belongsTo(Role);
+
+	Status.hasMany(Order, { foreignKey: { allowNull: false } });
+	Order.belongsTo(Status);
+
+	User.hasMany(Order, { foreignKey: { name: "senderId", allowNull: false } });
+	Order.belongsTo(User, { as: "sender" });
+	User.hasMany(Order, { foreignKey: { name: "receiverId", allowNull: false } });
+	Order.belongsTo(User, { as: "receiver" });
+
+	/*
+	await Role.sync({ alter: true });
 	await User.sync({ alter: true });
+	await Status.sync({ alter: true });
 	await Order.sync({ alter: true });
-	// await Order.create({ date: Date.now(), name: "iPhone X 64Gb Grey", price: 999, quantity: 1, total: 999, userId: 1 });
+	*/
+
+	//await Order.create({ date: Date.now(), name: "iPhone X 64Gb Grey", price: 999, quantity: 1, total: 999, address: "Stremyanny lane​, 36, Moscow, 117997, Russia", receiverId: 5, senderId: 2, statusId: "pending" });
 }
 
 initDb();
 
-export function findUserAccount(uname, pwd)
-{
-	return User.findOne({ where: { username: uname, password: pwd } });
-}
-
 export function findUser(uname)
 {
 	return User.findOne({ where: { username: uname } });
+}
+
+export function findUserById(userId)
+{
+	return User.findByPk(userId);
+}
+
+export async function addUser(uname, pwd)
+{
+	await User.create({ username: uname, password: pwd, roleId: "user" });
+}
+
+export async function getRolePerms(role)
+{
+	return Role.findOne({ where: { id: role } });
+}
+
+export async function getOrderById(id)
+{
+	return Order.findByPk(id);
 }
 
 export async function getOrdersFor(uname)
@@ -87,25 +154,50 @@ export async function getOrdersFor(uname)
 		return null;
 	}
 
-	return Order.findAll({ where: { userId: user.id } });
+	return Order.findAll({ where: { receiverId: user.id } });
 }
 
-export async function addOrderFor(uname, order)
+export async function getOrdersFrom(uname)
 {
 	const user = await findUser(uname);
 
 	if(!user)
 	{
+		return null;
+	}
+
+	return Order.findAll({ where: { senderId: user.id } });
+}
+
+export async function addOrder(order)
+{
+	const receiver = await findUserById(order.receiverId);
+
+	if(!receiver)
+	{
 		return false;
 	}
 
-	order.userId = user.id;
+	const sender = await findUserById(order.senderId);
+
+	if(!sender)
+	{
+		return false;
+	}
+
+	const status = await Status.findByPk(order.statusId);
+
+	if(!status)
+	{
+		return false;
+	}
+
 	await Order.create(order);
 
 	return true;
 }
 
-export async function orderBelongsTo(uname, orderId)
+export async function orderIsFor(uname, orderId)
 {
 	const user = await findUser(uname);
 
@@ -114,14 +206,28 @@ export async function orderBelongsTo(uname, orderId)
 		return false;
 	}
 
-	const order = await Order.findByPk(orderId);
+	const order = await getOrderById(orderId);
 
-	return order && order.id === orderId;
+	return order && order.receiverId === user.id;
+}
+
+export async function orderSentBy(uname, orderId)
+{
+	const user = await findUser(uname);
+
+	if(!user)
+	{
+		return false;
+	}
+
+	const order = await getOrderById(orderId);
+
+	return order && order.senderId === user.id;
 }
 
 export async function deleteOrder(orderId)
 {
-	const order = await Order.findByPk(orderId);
+	const order = await getOrderById(orderId);
 
 	if(!order)
 	{
@@ -135,14 +241,58 @@ export async function deleteOrder(orderId)
 
 export async function updateOrder(uorder)
 {
-	const order = await Order.findByPk(uorder.id);
+	const order = await getOrderById(uorder.id);
 
 	if(!order)
 	{
 		return false;
 	}
 
+	const receiver = await findUserById(uorder.receiverId);
+
+	if(!receiver)
+	{
+		return false;
+	}
+
+	const sender = await findUserById(uorder.senderId);
+
+	if(!sender)
+	{
+		return false;
+	}
+
+	const status = await Status.findByPk(uorder.statusId);
+
+	if(!status)
+	{
+		return false;
+	}
+
 	order.set(uorder);
+	await order.save();
+
+	return true;
+}
+
+export async function cancelOrder(orderId)
+{
+	const order = await getOrderById(orderId);
+
+	if(!order)
+	{
+		return false;
+	}
+
+	const status = await Status.findByPk(order.statusId);
+
+	if(!status.cancellable)
+	{
+		return false;
+	}
+
+	order.statusId = "cancelled"; // TODO: move this to cancel.js?
+
 	await order.save();
 
 	return true;

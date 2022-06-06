@@ -1,7 +1,7 @@
 <script>
-	import { authorized } from "$lib/stores.js";
+	import { authorized, role } from "$lib/stores.js";
 
-	import Login from "$lib/Login.svelte";
+	import Entry from "$lib/Entry.svelte";
 	import Logout from "$lib/Logout.svelte";
 	import Table from "$lib/Table.svelte";
 </script>
@@ -9,7 +9,11 @@
 <script context="module">
 	export function load({ session })
 	{
-		authorized.set(Boolean(session.user));
+		if(session.user)
+		{
+			authorized.set(true);
+			role.set(session.user.role.id);
+		}
 		/*
 		return {
 			props:
@@ -26,5 +30,5 @@
 	<Logout/>
 	<Table/>
 {:else}
-	<Login/>
+	<Entry/>
 {/if}
